@@ -1,3 +1,6 @@
+from shutil import copyfile
+
+import numpy
 import ray
 import torch
 import os
@@ -13,6 +16,7 @@ class SharedStorage:
         self.config = config
         self.game_name = game_name
         self.weights = weights
+        self.best_performance = -numpy.infty
         self.info = {
             "total_reward": 0,
             "muzero_reward": 0,
@@ -25,6 +29,7 @@ class SharedStorage:
             "value_loss": 0,
             "reward_loss": 0,
             "policy_loss": 0,
+            "history": None,
         }
 
     def get_weights(self):
@@ -41,4 +46,13 @@ class SharedStorage:
         return self.info
 
     def set_info(self, key, value):
-        self.info[key] = value
+        self.infos[key] = value
+        if key == "total_reward" and value > self.best_performance:
+            self.best_performance = value
+            path = os.path.join(self.config.results_path, "model.weights")
+            peak_path = os.path.join(self.config.results_path, "model_peak.weights")
+            try:
+                copyfile(path, peak_path)
+                print("policy improved, peak performance weights at {}".format(peak_path))
+            except FileNotFoundError:
+                pass

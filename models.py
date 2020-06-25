@@ -4,6 +4,13 @@ from abc import ABC, abstractmethod
 import torch
 
 
+def init_weights(m):
+    if isinstance(m, torch.nn.Linear):
+        print("initializing weights")
+        #torch.nn.init.kaiming_normal_(m.weight.data)    #, nonlinearity="relu")
+        torch.nn.init.normal_(m.weight.data, mean=0, std=0.1)
+
+
 class MuZeroNetwork:
     def __new__(cls, config):
         if config.network == "fullyconnected":

@@ -3,6 +3,7 @@ import importlib
 import os
 import pickle
 import time
+from typing import Optional
 
 import numpy
 import ray
@@ -31,7 +32,7 @@ class MuZero:
         >>> muzero.test(render=True, opponent="self", muzero_player=None)
     """
 
-    def __init__(self, game_name):
+    def __init__(self, game_name, replay_buffer_load_path: Optional[str] = None, weights_load_path: Optional[str] = None):
         self.game_name = game_name
 
         # Load the game and the config from the module with the game name
@@ -52,8 +53,16 @@ class MuZero:
         torch.manual_seed(self.config.seed)
 
         # Weights and replay buffer used to initialize workers
-        self.muzero_weights = models.MuZeroNetwork(self.config).get_weights()
-        self.replay_buffer = None
+        if weights_load_path is None:
+            self.muzero_weights = models.MuZeroNetwork(self.config).get_weights()
+        else:
+            self.muzero_weights = torch.load(weights_load_path)
+
+        if replay_buffer_load_path is None:
+            self.replay_buffer = None
+        else:
+            with open(replay_buffer_load_path, "rb+") as buffer_file:
+                self.replay_buffer = pickle.load(buffer_file)
 
     def train(self):
         ray.init()
@@ -187,6 +196,21 @@ class MuZero:
                 writer.add_scalar("3.Loss/Value loss", info["value_loss"], counter)
                 writer.add_scalar("3.Loss/Reward loss", info["reward_loss"], counter)
                 writer.add_scalar("3.Loss/Policy loss", info["policy_loss"], counter)
+                history = infos["history"]
+                if history is not None:
+                    action_count = numpy.array([0, 0, 0])
+                    for a in history.action_history:
+                        action_count[a] += 1
+                    writer.add_scalar("custom/action_0_fraction", action_count[0] / len(history.action_history), counter)
+                    writer.add_scalar("custom/action_1_fraction", action_count[1] / len(history.action_history), counter)
+                    writer.add_scalar("custom/action_2_fraction", action_count[2] / len(history.action_history), counter)
+                    writer.add_scalar("custom/position_min", numpy.min(numpy.array(history.observation_history)[:, 0, 0, 0]), counter)
+                    writer.add_scalar("custom/position_max", numpy.max(numpy.array(history.observation_history)[:, 0, 0, 0]), counter)
+                    writer.add_scalar("custom/position_avg", numpy.mean(numpy.array(history.observation_history)[:, 0, 0, 0]), counter)
+                if False: # history is not None:
+                    print(history.action_history, end="\r")
+                    print(numpy.max(numpy.array(history.observation_history)[:, 0, 0, 0]))
+                    print(numpy.min(numpy.array(history.observation_history)[:, 0, 0, 0]))
                 print(
                     "Last test reward: {:.2f}. Training step: {}/{}. Played games: {}. Loss: {:.2f}".format(
                         info["total_reward"],

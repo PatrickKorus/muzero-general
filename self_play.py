@@ -71,6 +71,10 @@ class SelfPlay:
                     "mean_value",
                     numpy.mean([value for value in game_history.root_values if value]),
                 )
+                shared_storage.set_infos.remote(
+                    "history",
+                    game_history,
+                )
                 if 1 < len(self.config.players):
                     shared_storage.set_info.remote(
                         "muzero_reward",
