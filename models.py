@@ -6,9 +6,9 @@ import torch
 
 def init_weights(m):
     if isinstance(m, torch.nn.Linear):
-        print("initializing weights")
-        #torch.nn.init.kaiming_normal_(m.weight.data)    #, nonlinearity="relu")
-        torch.nn.init.normal_(m.weight.data, mean=0, std=0.1)
+        # print("initializing weights")
+        torch.nn.init.kaiming_normal_(m.weight.data, nonlinearity="leaky_relu")
+        # torch.nn.init.normal_(m.weight.data, mean=0, std=0.1)
 
 
 class MuZeroNetwork:
@@ -584,7 +584,9 @@ def mlp(
     for i in range(len(sizes) - 1):
         act = activation if i < len(sizes) - 2 else output_activation
         layers += [torch.nn.Linear(sizes[i], sizes[i + 1]), act()]
-    return torch.nn.Sequential(*layers)
+    net = torch.nn.Sequential(*layers)
+    net.apply(init_weights)
+    return net
 
 
 def support_to_scalar(logits, support_size):

@@ -17,7 +17,7 @@ class MuZeroConfig:
         ### Game
         self.observation_shape = (1, 1,
                                   2)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
-        self.action_space = [i for i in range(3)]  # Fixed list of all possible actions. You should only edit the length
+        self.action_space = [i for i in range(2)]  # Fixed list of all possible actions. You should only edit the length
         self.players = [i for i in range(1)]  # List of players. You should only edit the length
         self.stacked_observations = 0  # Number of previous observations and previous actions to add to the current observation
 
@@ -38,7 +38,7 @@ class MuZeroConfig:
 
         # UCB formula
         self.pb_c_base = 19652
-        self.pb_c_init = 1.25
+        self.pb_c_init = 2.5
 
         ### Network
         self.network = "fullyconnected"  # "resnet" / "fullyconnected"
@@ -67,18 +67,19 @@ class MuZeroConfig:
         self.results_path = os.path.join(os.path.dirname(__file__), "../results", os.path.basename(__file__)[:-3],
                                          datetime.datetime.now().strftime(
                                              "%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
-        self.training_steps = 7000  # Total number of training steps (ie weights update according to a batch)
+        self.training_steps = 20000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 128  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 1  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
         self.training_device = "cuda" if torch.cuda.is_available() else "cpu"  # Train on GPU if available
+        print(self.training_device)
 
         self.optimizer = "Adam"  # "Adam" or "SGD". Paper uses SGD
         self.weight_decay = 1e-4  # L2 weights regularization
         self.momentum = 0.9  # Used only if optimizer is SGD
 
         # Exponential learning rate schedule
-        self.lr_init = 0.01  # Initial learning rate
+        self.lr_init = 0.02  # Initial learning rate
         self.lr_decay_rate = 0.9  # Set it to 1 to use a constant learning rate
         self.lr_decay_steps = 1000
 
@@ -107,9 +108,7 @@ class MuZeroConfig:
         Returns:
             Positive float.
         """
-        if trained_steps < 0.1 * self.training_steps:
-            return float("inf")
-        elif trained_steps < 0.5 * self.training_steps:
+        if trained_steps < 0.5 * self.training_steps:
             return 1.0
         elif trained_steps < 0.75 * self.training_steps:
             return 0.5
@@ -127,6 +126,7 @@ class Game(AbstractGame):
 
         if seed is not None:
             self.env.seed(seed)
+        self.max_position_reached = -float("inf")
 
     def step(self, action):
         """
@@ -138,11 +138,16 @@ class Game(AbstractGame):
         Returns:
             The new observation, the reward and a boolean if the game has ended.
         """
+        if action == 1:
+            action = 2
         observation, reward, done, _ = self.env.step(action)
-        if observation[0] > 0.2:
-            print(observation)
-        custom_reward = observation[0] + 1 if observation[0] > 0.2 else observation[0]
-        return numpy.array([[observation]]), custom_reward, done
+        if observation[0] > self.max_position_reached:
+            print(observation[0])
+            self.max_position_reached = observation[0]
+
+        reward = observation[0] - self.env.observation_space.low[0]
+        # custom_reward = observation[0] + 1 if observation[0] > 0.2 else observation[0]
+        return numpy.array([[observation]]), reward, done
 
     def legal_actions(self):
         """
@@ -155,7 +160,7 @@ class Game(AbstractGame):
         Returns:
             An array of integers, subset of the action space.
         """
-        return [i for i in range(3)]
+        return [i for i in range(1)]
 
     def reset(self):
         """

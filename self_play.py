@@ -71,7 +71,7 @@ class SelfPlay:
                     "mean_value",
                     numpy.mean([value for value in game_history.root_values if value]),
                 )
-                shared_storage.set_infos.remote(
+                shared_storage.set_info.remote(
                     "history",
                     game_history,
                 )

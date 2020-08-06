@@ -46,7 +46,7 @@ class SharedStorage:
         return self.info
 
     def set_info(self, key, value):
-        self.infos[key] = value
+        self.info[key] = value
         if key == "total_reward" and value > self.best_performance:
             self.best_performance = value
             path = os.path.join(self.config.results_path, "model.weights")

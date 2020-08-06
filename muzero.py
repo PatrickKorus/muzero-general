@@ -196,9 +196,9 @@ class MuZero:
                 writer.add_scalar("3.Loss/Value loss", info["value_loss"], counter)
                 writer.add_scalar("3.Loss/Reward loss", info["reward_loss"], counter)
                 writer.add_scalar("3.Loss/Policy loss", info["policy_loss"], counter)
-                history = infos["history"]
+                history = info["history"]
                 if history is not None:
-                    action_count = numpy.array([0, 0, 0])
+                    action_count = numpy.array([0, 0, 0, 0, 0])
                     for a in history.action_history:
                         action_count[a] += 1
                     writer.add_scalar("custom/action_0_fraction", action_count[0] / len(history.action_history), counter)
