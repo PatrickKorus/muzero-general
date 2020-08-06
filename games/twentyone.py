@@ -26,8 +26,8 @@ class MuZeroConfig:
 
         ### Game
         self.observation_shape = (3,3,3) # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
-        self.action_space = [i for i in range(2)] # Fixed list of all possible actions. You should only edit the length
-        self.players = [i for i in range(1)] # List of players. You should only edit the length
+        self.action_space = list(range(2)) # Fixed list of all possible actions. You should only edit the length
+        self.players = list(range(1)) # List of players. You should only edit the length
         self.stacked_observations = 0 # Number of previous observations and previous actions to add to the current observation
 
         # Evaluate
@@ -37,7 +37,9 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_actors = 4 # Number of simultaneous threads self-playing to feed the replay buffer
+        self.num_workers = 4 # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.selfplay_device = "cpu"  # "cpu" / "cuda"
+        self.selfplay_num_gpus = 0  # Number of GPUs per actor to use for the selfplay, it can be fractional, don't fortget to take the training worker, the test worker and the other selfplay workers into account. (ex: if you have 1 GPU and num_workers=1 -> selfplay_num_gpus=1/3 because 1/3 for the training, 1/3 for test worker selfplay and 1/3 for this selfplay worker)
         self.max_moves = 21 # Maximum number of moves if game is not finished before
         self.num_simulations = 21 # Number of future moves self-simulated
         self.discount = 1 # Chronological discount of the reward
@@ -80,11 +82,13 @@ class MuZeroConfig:
 
         ### Training
         self.results_path = os.path.join(os.path.dirname(__file__), "../results", os.path.basename(__file__)[:-3], datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
+        self.save_weights = False  # Save the weights in results_path as model.weights
         self.training_steps = 15000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 64  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
-        self.training_device = "cuda" if torch.cuda.is_available() else "cpu"  # Train on GPU if available
+        self.training_device = "cuda" if torch.cuda.is_available() else "cpu"  # Train on GPU if available. "cpu" / "cuda"
+        self.training_num_gpus = 1  # Number of GPUs to use for the training, it can be fractional, don't fortget to take the test worker and the selfplay workers into account
 
         self.optimizer = "SGD"  # "Adam" or "SGD". Paper uses SGD
         self.weight_decay = 1e-4  # L2 weights regularization
@@ -114,7 +118,7 @@ class MuZeroConfig:
         ### Adjust the self play / training ratio to avoid over/underfitting
         self.self_play_delay = 0  # Number of seconds to wait after each played game
         self.training_delay = 0  # Number of seconds to wait after each training step
-        self.ratio = None  # Desired self played games per training step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
+        self.ratio = None  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
 
 
     def visit_softmax_temperature_fn(self, trained_steps):
@@ -132,13 +136,14 @@ class MuZeroConfig:
         else:
             return 0.25
 
+
 class Game(AbstractGame):
     """
     Game wrapper.
     """
 
     def __init__(self, seed=None):
-        self.env = TwentyOne()
+        self.env = TwentyOne(seed)
 
     def step(self, action):
         """
@@ -199,7 +204,9 @@ class Game(AbstractGame):
         Returns:
             An integer from the action space.
         """
-        choice = input("Enter the action (0) Hit, or (1) Stand for the player {}: ".format(self.to_play()))
+        choice = input(
+            f"Enter the action (0) Hit, or (1) Stand for the player {self.to_play()}: "
+        )
         while choice not in [str(action) for action in self.legal_actions()]:
             choice = input("Enter either (0) Hit or (1) Stand : ")
         return int(choice)
@@ -218,10 +225,13 @@ class Game(AbstractGame):
             0: "Hit",
             1: "Stand",
         }
-        return "{}. {}".format(action_number, actions[action_number])
+        return f"{action_number}. {actions[action_number]}"
+
 
 class TwentyOne:
-    def __init__(self):
+    def __init__(self, seed):
+        numpy.random.seed(seed)
+
         self.player_hand = self.deal_card_value()
         self.dealer_hand = self.deal_card_value()
 
@@ -240,6 +250,7 @@ class TwentyOne:
     Action: 0 = Hit
     Action: 1 = Stand
     """
+
     def step(self, action):
 
         if action == 0:
@@ -247,19 +258,16 @@ class TwentyOne:
 
         done = self.is_busted() or action == 1 or self.player_hand == 21
 
-        reward = 0
-
         if done:
-            self.dealer_plays()    
-            reward = self.get_reward(True)
+            self.dealer_plays()
 
         return self.get_observation(), self.get_reward(done), done
 
     def get_observation(self):
         return [
-            numpy.array(numpy.full((3, 3), self.player_hand).astype(float)),
-            numpy.array(numpy.full((3, 3), self.dealer_hand).astype(float)),
-            numpy.array(numpy.full((3, 3), 0))
+            numpy.full((3, 3), self.player_hand, dtype="float32"),
+            numpy.full((3, 3), self.dealer_hand, dtype="float32"),
+            numpy.full((3, 3), 0),
         ]
 
     def legal_actions(self):
@@ -280,9 +288,8 @@ class TwentyOne:
             return 0
         return -1
 
-
     def deal_card_value(self):
-        card = randint(1,13)
+        card = randint(1, 13)
         if card >= 10:
             value = 10
         else:
@@ -292,7 +299,7 @@ class TwentyOne:
     def dealer_plays(self):
         if self.player_hand > 21:
             return
-        while self.dealer_hand<=16:
+        while self.dealer_hand <= 16:
             self.dealer_hand += self.deal_card_value()
 
     def is_busted(self):

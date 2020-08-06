@@ -15,9 +15,9 @@ class SelfPlay:
     Class which run in a dedicated thread to play games and save them to the replay-buffer.
     """
 
-    def __init__(self, initial_weights, game, config):
+    def __init__(self, initial_weights, Game, config, seed):
         self.config = config
-        self.game = game
+        self.game = Game(seed)
 
         # Fix random generator seed
         numpy.random.seed(self.config.seed)
@@ -26,11 +26,14 @@ class SelfPlay:
         # Initialize the network
         self.model = models.MuZeroNetwork(self.config)
         self.model.set_weights(initial_weights)
-        self.model.to(torch.device("cpu"))
+        self.model.to(torch.device(self.config.selfplay_device))
         self.model.eval()
 
     def continuous_self_play(self, shared_storage, replay_buffer, test_mode=False):
-        while True:
+        while (
+            ray.get(shared_storage.get_info.remote())["training_step"]
+            < self.config.training_steps
+        ):
             self.model.set_weights(
                 copy.deepcopy(ray.get(shared_storage.get_weights.remote()))
             )
@@ -75,23 +78,19 @@ class SelfPlay:
                     shared_storage.set_info.remote(
                         "muzero_reward",
                         sum(
-                            [
-                                reward
-                                for i, reward in enumerate(game_history.reward_history)
-                                if game_history.to_play_history[i - 1]
-                                == self.config.muzero_player
-                            ]
+                            reward
+                            for i, reward in enumerate(game_history.reward_history)
+                            if game_history.to_play_history[i - 1]
+                            == self.config.muzero_player
                         ),
                     )
                     shared_storage.set_info.remote(
                         "opponent_reward",
                         sum(
-                            [
-                                reward
-                                for i, reward in enumerate(game_history.reward_history)
-                                if game_history.to_play_history[i - 1]
-                                != self.config.muzero_player
-                            ]
+                            reward
+                            for i, reward in enumerate(game_history.reward_history)
+                            if game_history.to_play_history[i - 1]
+                            != self.config.muzero_player
                         ),
                     )
 
@@ -100,11 +99,17 @@ class SelfPlay:
                 time.sleep(self.config.self_play_delay)
             if not test_mode and self.config.ratio:
                 while (
-                    ray.get(replay_buffer.get_self_play_count.remote())
-                    / max(1, ray.get(shared_storage.get_info.remote())["training_step"])
-                    > self.config.ratio
+                    ray.get(shared_storage.get_info.remote())["training_step"]
+                    / max(
+                        1, ray.get(replay_buffer.get_info.remote())["num_played_steps"]
+                    )
+                    < self.config.ratio
+                    and ray.get(shared_storage.get_info.remote())["training_step"]
+                    < self.config.training_steps
                 ):
                     time.sleep(0.5)
+
+        self.close_game()
 
     def play_game(
         self, temperature, temperature_threshold, render, opponent, muzero_player
@@ -128,6 +133,12 @@ class SelfPlay:
             while (
                 not done and len(game_history.action_history) <= self.config.max_moves
             ):
+                assert (
+                    len(numpy.array(observation).shape) == 3
+                ), f"Observation should be 3 dimensionnal instead of {len(numpy.array(observation).shape)} dimensionnal. Got observation of shape: {numpy.array(observation).shape}"
+                assert (
+                    numpy.array(observation).shape == self.config.observation_shape
+                ), f"Observation should match the observation_shape defined in MuZeroConfig. Expected {self.config.observation_shape} but got {numpy.array(observation).shape}."
                 stacked_observations = game_history.get_stacked_observations(
                     -1, self.config.stacked_observations,
                 )
@@ -139,7 +150,7 @@ class SelfPlay:
                         stacked_observations,
                         self.game.legal_actions(),
                         self.game.to_play(),
-                        False if temperature == 0 else True,
+                        True,
                     )
                     action = self.select_action(
                         root,
@@ -150,11 +161,9 @@ class SelfPlay:
                     )
 
                     if render:
-                        print("Tree depth: {}".format(mcts_info["max_tree_depth"]))
+                        print(f'Tree depth: {mcts_info["max_tree_depth"]}')
                         print(
-                            "Root value for player {}: {:.2f}".format(
-                                self.game.to_play(), root.value()
-                            )
+                            f"Root value for player {self.game.to_play()}: {root.value():.2f}"
                         )
                 else:
                     action, root = self.select_opponent_action(
@@ -164,9 +173,7 @@ class SelfPlay:
                 observation, reward, done = self.game.step(action)
 
                 if render:
-                    print(
-                        "Played action: {}".format(self.game.action_to_string(action))
-                    )
+                    print(f"Played action: {self.game.action_to_string(action)}")
                     self.game.render()
 
                 game_history.store_search_statistics(root, self.config.action_space)
@@ -177,8 +184,10 @@ class SelfPlay:
                 game_history.reward_history.append(reward)
                 game_history.to_play_history.append(self.game.to_play())
 
-        self.game.close()
         return game_history
+
+    def close_game(self):
+        self.game.close()
 
     def select_opponent_action(self, opponent, stacked_observations):
         """
@@ -190,27 +199,27 @@ class SelfPlay:
                 stacked_observations,
                 self.game.legal_actions(),
                 self.game.to_play(),
-                0,
+                True,
             )
-            print("Tree depth: {}".format(mcts_info["max_tree_depth"]))
+            print(f'Tree depth: {mcts_info["max_tree_depth"]}')
+            print(f"Root value for player {self.game.to_play()}: {root.value():.2f}")
             print(
-                "Root value for player {}: {:.2f}".format(
-                    self.game.to_play(), root.value()
-                )
-            )
-            print(
-                "Player {} turn. MuZero suggests {}".format(
-                    self.game.to_play(),
-                    self.game.action_to_string(self.select_action(root, 0)),
-                )
+                f"Player {self.game.to_play()} turn. MuZero suggests {self.game.action_to_string(self.select_action(root, 0))}"
             )
             return self.game.human_to_action(), root
         elif opponent == "expert":
             return self.game.expert_agent(), None
         elif opponent == "random":
+            assert (
+                self.game.legal_actions()
+            ), f"Legal actions should not be an empty array. Got {self.game.legal_actions()}."
+            assert set(self.game.legal_actions()).issubset(
+                set(self.config.action_space)
+            ), "Legal actions should be a subset of the action space."
+
             return numpy.random.choice(self.game.legal_actions()), None
         else:
-            raise ValueError(
+            raise NotImplementedError(
                 'Wrong argument: "opponent" argument should be "self", "human", "expert" or "random"'
             )
 
@@ -222,7 +231,7 @@ class SelfPlay:
         in the config.
         """
         visit_counts = numpy.array(
-            [child.visit_count for child in node.children.values()]
+            [child.visit_count for child in node.children.values()], dtype="int32"
         )
         actions = [action for action in node.children.keys()]
         if temperature == 0:
@@ -288,6 +297,12 @@ class MCTS:
                 root_predicted_value, self.config.support_size
             ).item()
             reward = models.support_to_scalar(reward, self.config.support_size).item()
+            assert (
+                legal_actions
+            ), f"Legal actions should not be an empty array. Got {legal_actions}."
+            assert set(legal_actions).issubset(
+                set(self.config.action_space)
+            ), "Legal actions should be a subset of the action space."
             root.expand(
                 legal_actions, to_play, reward, policy_logits, hidden_state,
             )
@@ -393,18 +408,26 @@ class MCTS:
         At the end of a simulation, we propagate the evaluation all the way up the tree
         to the root.
         """
-        for node in reversed(search_path):
-            node.value_sum += value if node.to_play == to_play else -value
-            node.visit_count += 1
-            min_max_stats.update(
-                node.reward
-                + self.config.discount
-                * (node.value() if len(self.config.players) == 1 else -node.value())
-            )
+        if len(self.config.players) == 1:
+            for node in reversed(search_path):
+                node.value_sum += value
+                node.visit_count += 1
+                min_max_stats.update(node.reward + self.config.discount * node.value())
 
-            value = (
-                -node.reward if node.to_play == to_play else node.reward
-            ) + self.config.discount * value
+                value = node.reward + self.config.discount * value
+
+        elif len(self.config.players) == 2:
+            for node in reversed(search_path):
+                node.value_sum += value if node.to_play == to_play else -value
+                node.visit_count += 1
+                min_max_stats.update(node.reward + self.config.discount * -node.value())
+
+                value = (
+                    -node.reward if node.to_play == to_play else node.reward
+                ) + self.config.discount * value
+
+        else:
+            raise NotImplementedError("More than two player mode not implemented.")
 
 
 class Node:
@@ -434,17 +457,10 @@ class Node:
         self.reward = reward
         self.hidden_state = hidden_state
 
-        policy = {}
-        for a in actions:
-            try:
-                policy[a] = (
-                    (1 / sum(torch.exp(policy_logits[0] - policy_logits[0][a])))
-                    .detach()
-                    .numpy()
-                )
-            except OverflowError:
-                print("Warning: prior has been approximated")
-                policy[a] = 0.0
+        policy_values = torch.softmax(
+            torch.tensor([policy_logits[0][a] for a in actions]), dim=0
+        ).tolist()
+        policy = {a: policy_values[i] for i, a in enumerate(actions)}
         for action, p in policy.items():
             self.children[action] = Node(p)
 

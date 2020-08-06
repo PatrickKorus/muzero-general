@@ -18,8 +18,8 @@ class MuZeroConfig:
 
         ### Game
         self.observation_shape = (3, 3, 3)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
-        self.action_space = [i for i in range(9)]  # Fixed list of all possible actions. You should only edit the length
-        self.players = [i for i in range(2)]  # List of players. You should only edit the length
+        self.action_space = list(range(9))  # Fixed list of all possible actions. You should only edit the length
+        self.players = list(range(2))  # List of players. You should only edit the length
         self.stacked_observations = 0  # Number of previous observations and previous actions to add to the current observation
 
         # Evaluate
@@ -29,7 +29,9 @@ class MuZeroConfig:
 
 
         ### Self-Play
-        self.num_actors = 1  # Number of simultaneous threads self-playing to feed the replay buffer
+        self.num_workers = 1  # Number of simultaneous threads/workers self-playing to feed the replay buffer
+        self.selfplay_device = "cpu"  # "cpu" / "cuda"
+        self.selfplay_num_gpus = 0  # Number of GPUs per actor to use for the selfplay, it can be fractional, don't fortget to take the training worker, the test worker and the other selfplay workers into account. (ex: if you have 1 GPU and num_workers=1 -> selfplay_num_gpus=1/3 because 1/3 for the training, 1/3 for test worker selfplay and 1/3 for this selfplay worker)
         self.max_moves = 9  # Maximum number of moves if game is not finished before
         self.num_simulations = 25  # Number of future moves self-simulated
         self.discount = 1  # Chronological discount of the reward
@@ -72,11 +74,13 @@ class MuZeroConfig:
 
         ### Training
         self.results_path = os.path.join(os.path.dirname(__file__), "../results", os.path.basename(__file__)[:-3], datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
+        self.save_weights = False  # Save the weights in results_path as model.weights
         self.training_steps = 1000000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 64  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
-        self.training_device = "cuda" if torch.cuda.is_available() else "cpu"  # Train on GPU if available
+        self.training_device = "cuda" if torch.cuda.is_available() else "cpu"  # Train on GPU if available. "cpu" / "cuda"
+        self.training_num_gpus = 1  # Number of GPUs to use for the training, it can be fractional, don't fortget to take the test worker and the selfplay workers into account
 
         self.optimizer = "Adam"  # "Adam" or "SGD". Paper uses SGD
         self.weight_decay = 1e-4  # L2 weights regularization
@@ -106,7 +110,7 @@ class MuZeroConfig:
         ### Adjust the self play / training ratio to avoid over/underfitting
         self.self_play_delay = 0  # Number of seconds to wait after each played game
         self.training_delay = 0  # Number of seconds to wait after each training step
-        self.ratio = None  # Desired self played games per training step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
+        self.ratio = None  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
 
 
     def visit_softmax_temperature_fn(self, trained_steps):
@@ -179,9 +183,6 @@ class Game(AbstractGame):
         self.env.render()
         input("Press enter to take a step ")
 
-    def encode_board(self):
-        return self.env.encode_board()
-
     def human_to_action(self):
         """
         For multiplayer games, ask the user for a legal action
@@ -194,16 +195,12 @@ class Game(AbstractGame):
             try:
                 row = int(
                     input(
-                        "Enter the row (1, 2 or 3) to play for the player {}: ".format(
-                            self.to_play()
-                        )
+                        f"Enter the row (1, 2 or 3) to play for the player {self.to_play()}: "
                     )
                 )
                 col = int(
                     input(
-                        "Enter the column (1, 2 or 3) to play for the player {}: ".format(
-                            self.to_play()
-                        )
+                        f"Enter the column (1, 2 or 3) to play for the player {self.to_play()}: "
                     )
                 )
                 choice = (row - 1) * 3 + (col - 1)
@@ -229,7 +226,7 @@ class Game(AbstractGame):
             Action as an integer to take in the current game state
         """
         return self.env.expert_action()
-        
+
     def action_to_string(self, action_number):
         """
         Convert an action number to a string representing the action.
@@ -242,19 +239,19 @@ class Game(AbstractGame):
         """
         row = 3 - action_number // 3
         col = action_number % 3 + 1
-        return "Play row {}, column {}".format(row, col)
+        return f"Play row {row}, column {col}"
 
 
 class TicTacToe:
     def __init__(self):
-        self.board = numpy.zeros((3, 3)).astype(int)
+        self.board = numpy.zeros((3, 3), dtype="int32")
         self.player = 1
 
     def to_play(self):
         return 0 if self.player == 1 else 1
 
     def reset(self):
-        self.board = numpy.zeros((3, 3)).astype(int)
+        self.board = numpy.zeros((3, 3), dtype="int32")
         self.player = 1
         return self.get_observation()
 
@@ -272,10 +269,10 @@ class TicTacToe:
         return self.get_observation(), reward, done
 
     def get_observation(self):
-        board_player1 = numpy.where(self.board == 1, 1.0, 0.0)
-        board_player2 = numpy.where(self.board == -1, 1.0, 0.0)
-        board_to_play = numpy.full((3, 3), self.player).astype(float)
-        return numpy.array([board_player1, board_player2, board_to_play])
+        board_player1 = numpy.where(self.board == 1, 1, 0)
+        board_player2 = numpy.where(self.board == -1, 1, 0)
+        board_to_play = numpy.full((3, 3), self.player)
+        return numpy.array([board_player1, board_player2, board_to_play], dtype="int32")
 
     def legal_actions(self):
         legal = []
@@ -289,9 +286,9 @@ class TicTacToe:
     def have_winner(self):
         # Horizontal and vertical checks
         for i in range(3):
-            if (self.board[i, :] == self.player * numpy.ones(3).astype(int)).all():
+            if (self.board[i, :] == self.player * numpy.ones(3, dtype="int32")).all():
                 return True
-            if (self.board[:, i] == self.player * numpy.ones(3).astype(int)).all():
+            if (self.board[:, i] == self.player * numpy.ones(3, dtype="int32")).all():
                 return True
 
         # Diagonal checks
@@ -317,13 +314,17 @@ class TicTacToe:
         for i in range(3):
             if abs(sum(board[i, :])) == 2:
                 ind = numpy.where(board[i, :] == 0)[0][0]
-                action = numpy.ravel_multi_index((numpy.array([i]), numpy.array([ind])), (3, 3))[0]
+                action = numpy.ravel_multi_index(
+                    (numpy.array([i]), numpy.array([ind])), (3, 3)
+                )[0]
                 if self.player * sum(board[i, :]) > 0:
-                    return action 
+                    return action
 
             if abs(sum(board[:, i])) == 2:
                 ind = numpy.where(board[:, i] == 0)[0][0]
-                action = numpy.ravel_multi_index((numpy.array([ind]), numpy.array([i])), (3, 3))[0]
+                action = numpy.ravel_multi_index(
+                    (numpy.array([ind]), numpy.array([i])), (3, 3)
+                )[0]
                 if self.player * sum(board[:, i]) > 0:
                     return action
 
@@ -332,13 +333,17 @@ class TicTacToe:
         anti_diag = numpy.fliplr(board).diagonal()
         if abs(sum(diag)) == 2:
             ind = numpy.where(diag == 0)[0][0]
-            action = numpy.ravel_multi_index((numpy.array([ind]), numpy.array([ind])), (3, 3))[0]
+            action = numpy.ravel_multi_index(
+                (numpy.array([ind]), numpy.array([ind])), (3, 3)
+            )[0]
             if self.player * sum(diag) > 0:
                 return action
 
         if abs(sum(anti_diag)) == 2:
             ind = numpy.where(anti_diag == 0)[0][0]
-            action = numpy.ravel_multi_index((numpy.array([ind]), numpy.array([2 - ind])), (3, 3))[0]
+            action = numpy.ravel_multi_index(
+                (numpy.array([ind]), numpy.array([2 - ind])), (3, 3)
+            )[0]
             if self.player * sum(anti_diag) > 0:
                 return action
 
