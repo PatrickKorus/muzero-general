@@ -7,6 +7,9 @@ import numpy
 
 
 # Game independent
+from gym.spaces import Discrete
+
+
 class MCTS:
     """
     Core Monte Carlo Tree Search algorithm.
@@ -162,8 +165,8 @@ class Node:
         """
         if self.done:
             #self.value_sum = -100
-            self.reward = 0.0
-            self.value_sum = 0.0
+            #self.reward = 0.0
+            #self.value_sum = 0.0
             self.children = {}
         else:
             for action in actions:
@@ -279,8 +282,23 @@ class DeepCopyableGame:
         return self.env.reset()
 
     def step(self, action):
-        observation, reward, done, _ = self.env.step(action)
-        return observation, reward, done
+
+        def step_multiple(action, n, gamma=0.3):
+            observation, reward, done, _ = self.env.step(action)
+            reward += 11
+            for it in range(n-1):
+                observation, reward_add, done, _ = self.env.step(action)
+                reward = reward_add + 11 + gamma * reward_add
+            return observation, reward, done
+        if action == 0:
+            return step_multiple(0, 5)
+        elif action == 1:
+            return step_multiple(0, 1)
+        elif action == 2:
+            return step_multiple(1, 1)
+        elif action == 3:
+            return step_multiple(1, 5)
+
 
     def get_copy(self):
         return DeepCopyableGame(deepcopy(self.env))
@@ -318,16 +336,46 @@ class MCTSEvalConfig:
         self.pb_c_base = 19652
         self.pb_c_init = 1.25
         self.discount = 0.99
-        self.action_space = [0, 1]
+        self.action_space = [0, 1, 2, 3]
         self.root_dirichlet_alpha = 0.25
         self.root_exploration_fraction = 0.25
         self.num_simulations = 200
+
+class DiscreteActionWrapper(gym.ActionWrapper):
+    def __init__(self, env, num_actions=5):
+        self.original_action_space = env.action_space
+        env.action_space = Discrete(num_actions)
+        self.action_equivalents = numpy.array([
+            0.5 * self.original_action_space.low,
+            0.5 * self.original_action_space.high])
+
+        #numpy.array([self.original_action_space.low,
+                                  # self.original_action_space.low * 0.25,
+                                  # [0],
+                                  # self.original_action_space.high * 0.25,
+                                  # self.original_action_space.high])
+        super().__init__(env)
+
+    def action(self, act):
+        # modify act
+        act = self.action_equivalents[act]
+        return act
+
+    def __deepcopy__(self, memodict={}):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memodict[id(self)] = result
+        for k, v in self.__dict__.items():
+            setattr(result, k, deepcopy(v, memodict))
+        return result
 
 
 if __name__ == "__main__":
     config = MCTSEvalConfig()
     mcts = MCTS(config)
-    env = gym.make("CartPole-v1")
+    #env = gym.make("CartPole-v1")
+    env = gym.make("Pendulum-v0")
+    env = DiscreteActionWrapper(env)
     game = DeepCopyableGame(env)
     game_copy = None
     obs = game.reset()
@@ -344,14 +392,14 @@ if __name__ == "__main__":
             game=game,
             legal_actions=config.action_space,
             add_exploration_noise=False,
-            override_root_with=None
+            override_root_with=next_node
         )
         print(info)
         action = select_action(
             node=result_node,
             temperature=0,
         )
-        next_node=result_node.children[action]
+        next_node = result_node.children[action]
         print(action)
         if render:
             if game_copy is not None:
@@ -359,4 +407,5 @@ if __name__ == "__main__":
             game_copy = game.get_copy()
             game_copy.env.render()
         obs, reward, done = game.step(action)
+        print (reward)
     print(it)
