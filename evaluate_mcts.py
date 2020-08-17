@@ -172,7 +172,23 @@ class Node:
             for action in actions:
                 game_copy = self.game_copy.get_copy()
                 obs, rew, done = game_copy.step(action)
-                self.children[action] = Node(prior=rew, obs=obs, rew=rew, done=done, game=game_copy)
+                prior = self.roll_out(game=game_copy, gamma=0.99, max_depth=15, num_roll_outs=5)
+                self.children[action] = Node(prior=prior, obs=obs, rew=rew, done=done, game=game_copy)
+
+    def roll_out(self, game: "DeepCopyableGame", gamma, max_depth, num_roll_outs):
+        reward_avg = 0
+        for it1 in range(num_roll_outs):
+            game = game.get_copy()
+            reward = 0
+            done = False
+            for it in range(max_depth):
+                action = numpy.random.choice(2) + 1
+                if done:
+                    break
+                _, rew, done = game.step(action)
+                reward += gamma * rew
+            reward_avg = (reward_avg * it1 + reward) / (it1 + 1)
+        return reward_avg
 
     def add_exploration_noise(self, dirichlet_alpha, exploration_fraction):
         """
@@ -281,6 +297,9 @@ class DeepCopyableGame:
     def reset(self):
         return self.env.reset()
 
+    def sample_action(self):
+        return self.env.action_space.sample()
+
     def step(self, action):
 
         def step_multiple(action, n, gamma=0.3):
@@ -298,7 +317,8 @@ class DeepCopyableGame:
             return step_multiple(1, 1)
         elif action == 3:
             return step_multiple(1, 5)
-
+        else:
+            raise ValueError("Invalid Action in Wrapper, Action was {}".format(action))
 
     def get_copy(self):
         return DeepCopyableGame(deepcopy(self.env))
@@ -341,8 +361,9 @@ class MCTSEvalConfig:
         self.root_exploration_fraction = 0.25
         self.num_simulations = 200
 
+
 class DiscreteActionWrapper(gym.ActionWrapper):
-    def __init__(self, env, num_actions=5):
+    def __init__(self, env, num_actions=4):
         self.original_action_space = env.action_space
         env.action_space = Discrete(num_actions)
         self.action_equivalents = numpy.array([
