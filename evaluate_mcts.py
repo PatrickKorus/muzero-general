@@ -172,8 +172,8 @@ class Node:
             for action in actions:
                 game_copy = self.game_copy.get_copy()
                 obs, rew, done = game_copy.step(action)
-                prior = rew  # self.roll_out(game=game_copy, gamma=0.99, max_depth=15, num_roll_outs=5)
-                self.children[action] = Node(prior=prior, obs=obs, rew=rew, done=done, game=game_copy)
+                prior = 0 if obs[1] == obs[0] == action else -1 # rew  # self.roll_out(game=game_copy, gamma=0.99, max_depth=15, num_roll_outs=5)
+                self.children[action] = Node(prior=prior + rew, obs=obs, rew=rew, done=done, game=game_copy)
 
     def roll_out(self, game: "DeepCopyableGame", gamma, max_depth, num_roll_outs):
         reward_avg = 0
@@ -293,6 +293,7 @@ class DeepCopyableGame:
 
     def __init__(self, env: gym.Env):
         self.env = env
+        self.previous_steps = numpy.array([0 for i in range(5)], dtype="float64")
 
     def reset(self):
         return self.env.reset()
@@ -301,32 +302,35 @@ class DeepCopyableGame:
         return self.env.action_space.sample()
 
     def step(self, action):
-
-        def step_multiple(action, n, gamma=0.3):
-            observation, reward, done, _ = self.env.step(action)
-            reward += 11
-            for it in range(n-1):
-                observation, reward_add, done, _ = self.env.step(action)
-                reward = reward_add + 11 + gamma * reward_add
-            return observation, reward, done
-        if action == 0:
-            return step_multiple(0, 8)
-        if action == 1:
-            return step_multiple(0, 4)
-        elif action == 2:
-            return step_multiple(0, 2)
-        elif action == 3:
-            return step_multiple(0, 1)
-        elif action == 4:
-            return step_multiple(1, 1)
-        elif action == 5:
-            return step_multiple(1, 2)
-        elif action == 6:
-            return step_multiple(1, 4)
-        elif action == 7:
-            return step_multiple(1, 8)
-        else:
-            raise ValueError("Invalid Action in Wrapper, Action was {}".format(action))
+        numpy.roll(self.previous_steps, 1)
+        observation, rew, done, _ = self.env.step(action)
+        self.previous_steps[0] = float(action)
+        return numpy.concatenate((self.previous_steps, observation)), rew + 11, done
+        #def step_multiple(action, n, gamma=0.3):
+        #    observation, reward, done, _ = self.env.step(action)
+        #    reward += 11
+        #    for it in range(n-1):
+        #
+        #        reward = reward_add + 11 + gamma * reward_add
+        #    return observation, reward, done
+        #if action == 0:
+        #    return step_multiple(0, 8)
+        #if action == 1:
+        #    return step_multiple(0, 4)
+        #elif action == 2:
+        #    return step_multiple(0, 2)
+        #elif action == 3:
+        #    return step_multiple(0, 1)
+        #elif action == 4:
+        #    return step_multiple(1, 1)
+        #elif action == 5:
+        #    return step_multiple(1, 2)
+        #elif action == 6:
+        #    return step_multiple(1, 4)
+        #elif action == 7:
+        #    return step_multiple(1, 8)
+        #else:
+        #    raise ValueError("Invalid Action in Wrapper, Action was {}".format(action))#
 
     def get_copy(self):
         return DeepCopyableGame(deepcopy(self.env))
@@ -366,7 +370,7 @@ class MCTSEvalConfig:
         self.pb_c_base = 19652
         self.pb_c_init = 1.25
         self.discount = 0.99
-        self.action_space = [i for i in range(8)]
+        self.action_space = [i for i in range(2)]
         self.root_dirichlet_alpha = 0.25
         self.root_exploration_fraction = 0.25
         self.num_simulations = 200
