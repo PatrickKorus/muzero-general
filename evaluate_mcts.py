@@ -172,7 +172,7 @@ class Node:
             for action in actions:
                 game_copy = self.game_copy.get_copy()
                 obs, rew, done = game_copy.step(action)
-                prior = self.roll_out(game=game_copy, gamma=0.99, max_depth=15, num_roll_outs=5)
+                prior = rew  # self.roll_out(game=game_copy, gamma=0.99, max_depth=15, num_roll_outs=5)
                 self.children[action] = Node(prior=prior, obs=obs, rew=rew, done=done, game=game_copy)
 
     def roll_out(self, game: "DeepCopyableGame", gamma, max_depth, num_roll_outs):
@@ -310,13 +310,21 @@ class DeepCopyableGame:
                 reward = reward_add + 11 + gamma * reward_add
             return observation, reward, done
         if action == 0:
-            return step_multiple(0, 5)
-        elif action == 1:
-            return step_multiple(0, 1)
+            return step_multiple(0, 8)
+        if action == 1:
+            return step_multiple(0, 4)
         elif action == 2:
-            return step_multiple(1, 1)
+            return step_multiple(0, 2)
         elif action == 3:
-            return step_multiple(1, 5)
+            return step_multiple(0, 1)
+        elif action == 4:
+            return step_multiple(1, 1)
+        elif action == 5:
+            return step_multiple(1, 2)
+        elif action == 6:
+            return step_multiple(1, 4)
+        elif action == 7:
+            return step_multiple(1, 8)
         else:
             raise ValueError("Invalid Action in Wrapper, Action was {}".format(action))
 
@@ -334,9 +342,11 @@ def select_action(node, temperature):
         [child.visit_count for child in node.children.values()], dtype="int32"
     )
     print(visit_counts)
+    values = numpy.array([child.value() for child in node.children.values()])
+    print(values)
     actions = [action for action in node.children.keys()]
     if temperature == 0:
-        action = actions[numpy.argmax(visit_counts)]
+        action = actions[numpy.argmax(values)]
     elif temperature == float("inf"):
         action = numpy.random.choice(actions)
     else:
@@ -356,7 +366,7 @@ class MCTSEvalConfig:
         self.pb_c_base = 19652
         self.pb_c_init = 1.25
         self.discount = 0.99
-        self.action_space = [0, 1, 2, 3]
+        self.action_space = [i for i in range(8)]
         self.root_dirichlet_alpha = 0.25
         self.root_exploration_fraction = 0.25
         self.num_simulations = 200
