@@ -172,7 +172,7 @@ class Node:
             for action in actions:
                 game_copy = self.game_copy.get_copy()
                 obs, rew, done = game_copy.step(action)
-                prior = 0 if obs[1] == obs[0] == action else -1 # rew  # self.roll_out(game=game_copy, gamma=0.99, max_depth=15, num_roll_outs=5)
+                prior = 0.5 if obs[1] == obs[0] == action else 0 # rew  # self.roll_out(game=game_copy, gamma=0.99, max_depth=15, num_roll_outs=5)
                 self.children[action] = Node(prior=prior + rew, obs=obs, rew=rew, done=done, game=game_copy)
 
     def roll_out(self, game: "DeepCopyableGame", gamma, max_depth, num_roll_outs):
@@ -350,7 +350,7 @@ def select_action(node, temperature):
     print(values)
     actions = [action for action in node.children.keys()]
     if temperature == 0:
-        action = actions[numpy.argmax(values)]
+        action = actions[numpy.argmax(visit_counts)]
     elif temperature == float("inf"):
         action = numpy.random.choice(actions)
     else:
@@ -373,7 +373,7 @@ class MCTSEvalConfig:
         self.action_space = [i for i in range(2)]
         self.root_dirichlet_alpha = 0.25
         self.root_exploration_fraction = 0.25
-        self.num_simulations = 200
+        self.num_simulations = 400
 
 
 class DiscreteActionWrapper(gym.ActionWrapper):
