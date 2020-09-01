@@ -1,7 +1,6 @@
 import datetime
 import os
 
-import gym
 import numpy
 import torch
 
@@ -13,6 +12,7 @@ class MuZeroConfig:
         # More information is available here: https://github.com/werner-duvaud/muzero-general/wiki/Hyperparameter-Optimization
 
         self.seed = 0  # Seed for numpy, torch and the game
+        self.max_num_gpus = None  # Fix the maximum number of GPUs to use. By default muzero uses every GPUs available
 
 
 
@@ -30,8 +30,7 @@ class MuZeroConfig:
 
         ### Self-Play
         self.num_workers = 1  # Number of simultaneous threads/workers self-playing to feed the replay buffer
-        self.selfplay_device = "cpu"  # "cpu" / "cuda"
-        self.selfplay_num_gpus = 0  # Number of GPUs per actor to use for the selfplay, it can be fractional, don't fortget to take the training worker, the test worker and the other selfplay workers into account. (ex: if you have 1 GPU and num_workers=1 -> selfplay_num_gpus=1/3 because 1/3 for the training, 1/3 for test worker selfplay and 1/3 for this selfplay worker)
+        self.selfplay_on_gpu = False
         self.max_moves = 6  # Maximum number of moves if game is not finished before
         self.num_simulations = 10  # Number of future moves self-simulated
         self.discount = 0.978  # Chronological discount of the reward
@@ -52,7 +51,7 @@ class MuZeroConfig:
         self.support_size = 10  # Value and reward are scaled (with almost sqrt) and encoded on a vector with a range of -support_size to support_size
         
         # Residual Network
-        self.downsample = False  # Downsample observations before representation network (See paper appendix Network Architecture)
+        self.downsample = False  # Downsample observations before representation network, False / "CNN" (lighter) / "resnet" (See paper appendix Network Architecture)
         self.blocks = 1  # Number of blocks in the ResNet
         self.channels = 2  # Number of channels in the ResNet
         self.reduced_channels_reward = 2  # Number of channels in reward head
@@ -73,14 +72,13 @@ class MuZeroConfig:
 
 
         ### Training
-        self.results_path = os.path.join(os.path.dirname(__file__), "../results", os.path.basename(__file__)[:-3], datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
-        self.save_weights = True  # Save the weights in results_path as model.weights
+        self.results_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../results", os.path.basename(__file__)[:-3], datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S"))  # Path to store the model weights and TensorBoard logs
+        self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
         self.training_steps = 30000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 32  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 1  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
-        self.training_device = "cuda" if torch.cuda.is_available() else "cpu"  # Train on GPU if available. "cpu" / "cuda"
-        self.training_num_gpus = 1  # Number of GPUs to use for the training, it can be fractional, don't fortget to take the test worker and the selfplay workers into account
+        self.train_on_gpu = True if torch.cuda.is_available() else False  # Train on GPU if available
 
         self.optimizer = "Adam"  # "Adam" or "SGD". Paper uses SGD
         self.weight_decay = 1e-4  # L2 weights regularization
@@ -94,16 +92,15 @@ class MuZeroConfig:
 
 
         ### Replay Buffer
-        self.window_size = 5000  # Number of self-play games to keep in the replay buffer
+        self.replay_buffer_size = 5000  # Number of self-play games to keep in the replay buffer
         self.num_unroll_steps = 7  # Number of game moves to keep for every batch element
         self.td_steps = 7  # Number of steps in the future to take into account for calculating the target value
-        self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
-
-        # Prioritized Replay (See paper appendix Training)
-        self.PER = True  # Select in priority the elements in the replay buffer which are unexpected for the network
-        self.use_max_priority = False  # If False, use the n-step TD error as initial priority. Better for large replay buffer
+        self.PER = True  # Prioritized Replay (See paper appendix Training), select in priority the elements in the replay buffer which are unexpected for the network
         self.PER_alpha = 0.5  # How much prioritization is used, 0 corresponding to the uniform case, paper suggests 1
-        self.PER_beta = 1.0
+
+        # Reanalyze (See paper appendix Reanalyse)
+        self.use_last_model_value = True  # Use the last model to provide a fresher, stable n-step value (See paper appendix Reanalyze)
+        self.reanalyse_on_gpu = False
 
 
 
