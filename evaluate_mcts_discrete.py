@@ -62,7 +62,7 @@ class MCTS:
             root_predicted_value = None
         else:
             root = Node(0)
-            root_predicted_value = 0    # TODO: possibily initial roll out?
+            # root_predicted_value = 0    # Not used
             reward = reward
             policy_values = self.get_policy_priors()
             # hidden_state = observation
@@ -81,7 +81,7 @@ class MCTS:
                 reward,
                 policy_values=policy_values,
                 observation=observation,
-                game=game
+                game=game.get_copy()
             )
 
         if add_exploration_noise:
@@ -109,7 +109,9 @@ class MCTS:
             game_copy = parent.game.get_copy()
 
             observation, reward, done = game_copy.step(action)
-            value = reward if done else 0   # TODO: Value estimate over roll outs
+            # TODO: Value for CartPole-v0
+            value = reward if done else 0
+            # TODO: Value estimate over roll outs
             policy_values = self.get_policy_priors()
             # value, reward, policy_logits, hidden_state = model.recurrent_inference(
             #     parent.hidden_state,
@@ -132,7 +134,7 @@ class MCTS:
 
         extra_info = {
             "max_tree_depth": max_tree_depth,
-            "root_predicted_value": root_predicted_value,
+            # "root_predicted_value": root_predicted_value,
         }
         return root, extra_info
 

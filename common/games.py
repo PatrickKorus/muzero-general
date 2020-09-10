@@ -19,13 +19,14 @@ class DeepCopyableGymGame:
 
     @property
     def legal_actions(self):
+        # TODO: decide whether this should be in config or game
         return [i for i in range(self.env.action_space.n)]
 
     def sample_action(self):
         return self.env.action_space.sample()
 
     def step(self, action):
-        observation, rew, done, _ = self.env.step(action)
+        observation, rew, done, _ = self.env.step([action])
         return observation, rew, done
 
     def get_copy(self):
