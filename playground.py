@@ -12,6 +12,8 @@ from muzero import MuZero
 #    env.render()
 #    o, r, done, _ = env.step(a)
 #env.close()
-muzero = MuZero("pendulums")
+
+muzero = MuZero("cartpole-swingup")
 muzero.train()
 muzero.test(render=True, opponent="self", muzero_player=None)
+
