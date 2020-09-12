@@ -28,6 +28,9 @@ class SelfPlay:
         self.model.to(torch.device("cuda" if self.config.selfplay_on_gpu else "cpu"))
         self.model.eval()
 
+        # init state memory
+        self.memory = []
+
     def continuous_self_play(self, shared_storage, replay_buffer, test_mode=False):
         while ray.get(
             shared_storage.get_info.remote("training_step")
@@ -141,7 +144,7 @@ class SelfPlay:
 
                 # Choose the action
                 if opponent == "self" or muzero_player == self.game.to_play():
-                    root, mcts_info = MCTS(self.config).run(
+                    root, mcts_info, self.memory = MCTS(self.config, self.memory).run(
                         self.model,
                         stacked_observations,
                         self.game.legal_actions(),
@@ -190,7 +193,7 @@ class SelfPlay:
         Select opponent action for evaluating MuZero level.
         """
         if opponent == "human":
-            root, mcts_info = MCTS(self.config).run(
+            root, mcts_info, _ = MCTS(self.config, None).run(
                 self.model,
                 stacked_observations,
                 self.game.legal_actions(),
@@ -244,7 +247,6 @@ class SelfPlay:
 
         return action
 
-
 # Game independent
 class MCTS:
     """
@@ -254,8 +256,9 @@ class MCTS:
     reach a leaf node.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, memory):
         self.config = config
+        self.memory = memory
 
     def run(
         self,
@@ -292,6 +295,8 @@ class MCTS:
             root_predicted_value = models.support_to_scalar(
                 root_predicted_value, self.config.support_size
             ).item()
+
+
             reward = models.support_to_scalar(reward, self.config.support_size).item()
             assert (
                 legal_actions
@@ -303,11 +308,19 @@ class MCTS:
                 legal_actions, to_play, reward, policy_logits, hidden_state,
             )
 
-        if add_exploration_noise:
-            root.add_exploration_noise(
-                dirichlet_alpha=self.config.root_dirichlet_alpha,
-                exploration_fraction=self.config.root_exploration_fraction,
-            )
+        # "Go Explore" hack
+        init_hidden_state = root.hidden_state
+        if len(self.memory) == 0:
+            self.memory = init_hidden_state
+        else:
+            if torch.min(torch.cdist(self.memory, init_hidden_state)) > torch.Tensor([[0.1]]):
+                self.memory = torch.cat((self.memory, hidden_state))
+
+        # if add_exploration_noise:
+        #     root.add_exploration_noise(
+        #         dirichlet_alpha=self.config.root_dirichlet_alpha,
+        #         exploration_fraction=self.config.root_exploration_fraction,
+        #     )
 
         min_max_stats = MinMaxStats()
 
@@ -320,7 +333,7 @@ class MCTS:
 
             while node.expanded():
                 current_tree_depth += 1
-                action, node = self.select_child(node, min_max_stats)
+                action, node = self.select_child(node, min_max_stats, explore=add_exploration_noise)
                 search_path.append(node)
 
                 # Players play turn by turn
@@ -354,26 +367,26 @@ class MCTS:
             "max_tree_depth": max_tree_depth,
             "root_predicted_value": root_predicted_value,
         }
-        return root, extra_info
+        return root, extra_info, self.memory
 
-    def select_child(self, node, min_max_stats):
+    def select_child(self, node, min_max_stats, explore=False):
         """
         Select the child with the highest UCB score.
         """
         max_ucb = max(
-            self.ucb_score(node, child, min_max_stats)
+            self.ucb_score(node, child, min_max_stats, explore)
             for action, child in node.children.items()
         )
         action = numpy.random.choice(
             [
                 action
                 for action, child in node.children.items()
-                if self.ucb_score(node, child, min_max_stats) == max_ucb
+                if self.ucb_score(node, child, min_max_stats, explore) == max_ucb
             ]
         )
         return action, node.children[action]
 
-    def ucb_score(self, parent, child, min_max_stats):
+    def ucb_score(self, parent, child, min_max_stats, explore):
         """
         The score for a node is based on its value, plus an exploration bonus based on the prior.
         """
@@ -397,7 +410,10 @@ class MCTS:
         else:
             value_score = 0
 
-        return prior_score + value_score
+        # exploration score
+        exploration_score = torch.min(torch.cdist(self.memory, parent.hidden_state)).numpy() if explore else 0
+        #   print(prior_score, value_score, exploration_score)
+        return prior_score + value_score + exploration_score
 
     def backpropagate(self, search_path, value, to_play, min_max_stats):
         """

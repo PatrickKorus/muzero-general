@@ -142,7 +142,8 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
         encoded_state_normalized = (
             encoded_state - min_encoded_state
         ) / scale_encoded_state
-        return encoded_state_normalized
+        return encoded_state
+
 
     def dynamics(self, encoded_state, action):
         # Stack encoded_state with a game specific one hot encoded action (See paper appendix Network Architecture)
