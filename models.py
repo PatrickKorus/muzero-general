@@ -95,17 +95,17 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
         self.action_space_size = action_space_size
         self.full_support_size = 2 * support_size + 1
 
-        self.representation_network = torch.nn.DataParallel(
-            mlp(
-                observation_shape[0]
-                * observation_shape[1]
-                * observation_shape[2]
-                * (stacked_observations + 1)
-                + stacked_observations * observation_shape[1] * observation_shape[2],
-                fc_representation_layers,
-                encoding_size,
-            )
-        )
+        # self.representation_network = torch.nn.DataParallel(
+        #     mlp(
+        #         observation_shape[0]
+        #         * observation_shape[1]
+        #         * observation_shape[2]
+        #         * (stacked_observations + 1)
+        #         + stacked_observations * observation_shape[1] * observation_shape[2],
+        #         fc_representation_layers,
+        #         encoding_size,
+        #     )
+        # )
 
         self.dynamics_encoded_state_network = torch.nn.DataParallel(
             mlp(
@@ -131,18 +131,18 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
         return policy_logits, value
 
     def representation(self, observation):
-        encoded_state = self.representation_network(
-            observation.view(observation.shape[0], -1)
-        )
-        # Scale encoded state between [0, 1] (See appendix paper Training)
-        min_encoded_state = encoded_state.min(1, keepdim=True)[0]
-        max_encoded_state = encoded_state.max(1, keepdim=True)[0]
-        scale_encoded_state = max_encoded_state - min_encoded_state
-        scale_encoded_state[scale_encoded_state < 1e-5] += 1e-5
-        encoded_state_normalized = (
-            encoded_state - min_encoded_state
-        ) / scale_encoded_state
-        return encoded_state
+        # encoded_state = self.representation_network(
+        #     observation.view(observation.shape[0], -1)
+        # )
+        # # Scale encoded state between [0, 1] (See appendix paper Training)
+        # min_encoded_state = encoded_state.min(1, keepdim=True)[0]
+        # max_encoded_state = encoded_state.max(1, keepdim=True)[0]
+        # scale_encoded_state = max_encoded_state - min_encoded_state
+        # scale_encoded_state[scale_encoded_state < 1e-5] += 1e-5
+        # encoded_state_normalized = (
+        #     encoded_state - min_encoded_state
+        # ) / scale_encoded_state
+        return observation.view(observation.shape[0], -1)
 
 
     def dynamics(self, encoded_state, action):
@@ -160,15 +160,15 @@ class MuZeroFullyConnectedNetwork(AbstractNetwork):
         reward = self.dynamics_reward_network(next_encoded_state)
 
         # Scale encoded state between [0, 1] (See paper appendix Training)
-        min_next_encoded_state = next_encoded_state.min(1, keepdim=True)[0]
-        max_next_encoded_state = next_encoded_state.max(1, keepdim=True)[0]
-        scale_next_encoded_state = max_next_encoded_state - min_next_encoded_state
-        scale_next_encoded_state[scale_next_encoded_state < 1e-5] += 1e-5
-        next_encoded_state_normalized = (
-            next_encoded_state - min_next_encoded_state
-        ) / scale_next_encoded_state
+        # min_next_encoded_state = next_encoded_state.min(1, keepdim=True)[0]
+        # max_next_encoded_state = next_encoded_state.max(1, keepdim=True)[0]
+        # scale_next_encoded_state = max_next_encoded_state - min_next_encoded_state
+        # scale_next_encoded_state[scale_next_encoded_state < 1e-5] += 1e-5
+        # next_encoded_state_normalized = (
+        #     next_encoded_state - min_next_encoded_state
+        # ) / scale_next_encoded_state
 
-        return next_encoded_state_normalized, reward
+        return next_encoded_state, reward
 
     def initial_inference(self, observation):
         encoded_state = self.representation(observation)

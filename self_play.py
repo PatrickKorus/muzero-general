@@ -304,8 +304,10 @@ class MCTS:
             assert set(legal_actions).issubset(
                 set(self.config.action_space)
             ), "Legal actions should be a subset of the action space."
+
+            exploration_score = torch.min(torch.cdist(self.memory, hidden_state)).numpy() if len(self.memory) > 1 else 0
             root.expand(
-                legal_actions, to_play, reward, policy_logits, hidden_state,
+                legal_actions, to_play, reward, policy_logits, hidden_state, exploration_score
             )
 
         # "Go Explore" hack
@@ -313,8 +315,8 @@ class MCTS:
         if len(self.memory) == 0:
             self.memory = init_hidden_state
         else:
-            if torch.min(torch.cdist(self.memory, init_hidden_state)) > torch.Tensor([[0.1]]):
-                self.memory = torch.cat((self.memory, hidden_state))
+            if torch.min(torch.cdist(self.memory, init_hidden_state)) > torch.Tensor([[0.01]]):
+                self.memory = torch.cat((self.memory, init_hidden_state))
 
         # if add_exploration_noise:
         #     root.add_exploration_noise(
@@ -351,13 +353,18 @@ class MCTS:
             )
             value = models.support_to_scalar(value, self.config.support_size).item()
             reward = models.support_to_scalar(reward, self.config.support_size).item()
+
+            # go explore hack
+            explore_value = torch.min(torch.cdist(self.memory, hidden_state)).numpy()
             node.expand(
                 self.config.action_space,
                 virtual_to_play,
                 reward,
                 policy_logits,
                 hidden_state,
+                explore_value
             )
+
 
             self.backpropagate(search_path, value, virtual_to_play, min_max_stats)
 
@@ -366,7 +373,14 @@ class MCTS:
         extra_info = {
             "max_tree_depth": max_tree_depth,
             "root_predicted_value": root_predicted_value,
+            "memory_len": len(self.memory),
+            "state_explore_value": explore_value,
+            "state": observation,
+            "inferred_state": hidden_state
         }
+
+        if numpy.random.uniform(0, 1) < 0.01:
+            print(extra_info)
         return root, extra_info, self.memory
 
     def select_child(self, node, min_max_stats, explore=False):
@@ -411,9 +425,11 @@ class MCTS:
             value_score = 0
 
         # exploration score
-        exploration_score = torch.min(torch.cdist(self.memory, parent.hidden_state)).numpy() if explore else 0
+        exploration_score = child.explore_value if explore else 0
         #   print(prior_score, value_score, exploration_score)
-        return prior_score + value_score + exploration_score
+        if numpy.random.uniform(0, 1) < 0.00001:
+            print("exploration_score", exploration_score, child.hidden_state)
+        return prior_score + value_score + 0.5 * exploration_score
 
     def backpropagate(self, search_path, value, to_play, min_max_stats):
         """
@@ -451,6 +467,7 @@ class Node:
         self.children = {}
         self.hidden_state = None
         self.reward = 0
+        self.explore_value = 0
 
     def expanded(self):
         return len(self.children) > 0
@@ -460,7 +477,7 @@ class Node:
             return 0
         return self.value_sum / self.visit_count
 
-    def expand(self, actions, to_play, reward, policy_logits, hidden_state):
+    def expand(self, actions, to_play, reward, policy_logits, hidden_state, explore_value):
         """
         We expand a node using the value, reward and policy prediction obtained from the
         neural network.
@@ -468,6 +485,7 @@ class Node:
         self.to_play = to_play
         self.reward = reward
         self.hidden_state = hidden_state
+        self.explore_value = explore_value
 
         policy_values = torch.softmax(
             torch.tensor([policy_logits[0][a] for a in actions]), dim=0
