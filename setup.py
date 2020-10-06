@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name='mcts-general',
     version='1.0.0',
-    packages=['muzero_general', 'games'],
+    packages=['muzero_general'],
     url='https://github.com/PatrickKorus/muzero-general',
     license='MIT',
     author='Patrick Korus',
