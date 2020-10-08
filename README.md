@@ -4,7 +4,7 @@ This is the fork of the MuZero implementation at [werner-duvaud/muzero-general](
 closely follows the pseudo code attached to the [original paper](https://arxiv.org/abs/1911.08265v2). I have made some 
 minor changes and made logging available in a `matplotlib` kind of fashion for our experiments described in  my thesis:
 
-#### [An Evaluation of MCTS Methods for Continuous Control Tasks](https://github.com/PatrickKorus/muzero-general) 
+#### [An Evaluation of MCTS Methods for Continuous Control Tasks](https://www.dropbox.com/s/9acbtihfmagn7el/Bachelor_Thesis___An_Evaluation_of_MCTS_Methods_for_Continuous_Control_Tasks_FINAL.pdf?dl=0) 
 
 The following docs are taken from [werner-duvaud/muzero-general](https://github.com/werner-duvaud/muzero-general) where
 more documentation can be found. A detailed explanation of how MuZero works can also be found in my thesis.

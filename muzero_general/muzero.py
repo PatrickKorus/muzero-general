@@ -213,7 +213,7 @@ class MuZero:
         writer = SummaryWriter(self.config.results_path)
 
         print(
-            "\nTraining...\nRun tensorboard --logdir ./results and go to http://localhost:6006/ to see in real time the training performance.\n"
+            "\nTraining...\nRun tensorboard --logdir ./result_muzero and go to http://localhost:6006/ to see in real time the training performance.\n"
         )
 
         # Save hyperparameters to TensorBoard
